@@ -819,23 +819,57 @@ let charts = { vendas: null, fin: null };
 let modalCallback = null;
 
 /* ============================================================
-   PERSISTÊNCIA
+   PERSISTÊNCIA — GOOGLE SHEETS
    ============================================================ */
-function saveDB() {
+const API_URL = 'https://script.google.com/macros/s/AKfycbzcE8GDXLjqxX3weYDVBfP1OAA9RqG1ZWH9ihOKCOIl8QsBO_JNbl3mFnwyCihBY_R5Zw/exec';
+
+async function saveDB() {
+  // Salva localmente como cache imediato
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
+
+  // Salva na nuvem (Google Sheets)
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
+    await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify(db),
+    });
   } catch (e) {
-    console.error('Erro ao salvar dados:', e);
-    showToast('Erro ao salvar dados localmente.', 'error');
+    console.warn('Erro ao salvar na nuvem:', e);
+    showToast('Dados salvos localmente. Sem conexão com a nuvem.', 'warning');
   }
 }
 
-function loadDB() {
+async function loadDB() {
+  // Tenta carregar da nuvem primeiro
+  try {
+    const res = await fetch(API_URL + '?action=load');
+    const text = await res.text();
+    if (text && text !== '{}' && text.trim() !== '') {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.clientes) {
+        db = {
+          clientes: parsed.clientes || [],
+          vendas: parsed.vendas || [],
+          pagamentos: parsed.pagamentos || {},
+          historico_pgto: parsed.historico_pgto || [],
+          nextCliId: parsed.nextCliId || 1,
+          nextVendaId: parsed.nextVendaId || 1,
+          nextPgtoId: parsed.nextPgtoId || 1,
+        };
+        // Atualiza cache local
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(db)); } catch(e) {}
+        return;
+      }
+    }
+  } catch (e) {
+    console.warn('Sem acesso à nuvem, usando cache local:', e);
+  }
+
+  // Fallback: localStorage
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      // Merge para garantir que novas chaves existam
       db = {
         clientes: parsed.clientes || [],
         vendas: parsed.vendas || [],
@@ -847,8 +881,7 @@ function loadDB() {
       };
     }
   } catch (e) {
-    console.error('Erro ao carregar dados:', e);
-    showToast('Erro ao carregar dados salvos.', 'error');
+    console.error('Erro ao carregar dados locais:', e);
   }
 }
 
@@ -1828,16 +1861,18 @@ function downloadFile(content, filename, mimeType) {
 /* ============================================================
    INICIALIZAÇÃO
    ============================================================ */
-function init() {
+async function init() {
   // Tema
   const savedTheme = localStorage.getItem('ponto_certo_theme') || 'light';
   applyTheme(savedTheme);
 
-  // Carregar dados
-  loadDB();
+  // Carregar dados da nuvem
+  showToast('Carregando dados da nuvem...', 'info', 4000);
+  await loadDB();
 
   // Renderizar página inicial
   renderDashboard();
+  showToast('Dados carregados!', 'success');
 }
 
 init();
